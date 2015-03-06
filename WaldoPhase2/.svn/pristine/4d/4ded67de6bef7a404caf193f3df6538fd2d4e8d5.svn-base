@@ -1,0 +1,356 @@
+package ca.ubc.cpsc210.waldo.waldowebservice;
+
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.util.ArrayList;
+import java.util.Date;
+import java.util.List;
+
+import org.json.JSONArray;
+import org.json.JSONException;
+import org.json.JSONObject;
+import org.json.JSONTokener;
+
+import ca.ubc.cpsc210.waldo.exceptions.WaldoException;
+import ca.ubc.cpsc210.waldo.model.Waldo;
+import ca.ubc.cpsc210.waldo.util.LatLon;
+
+/**
+ * The WaldoService class interacts with the Waldo web service over the web. 
+ * It obtains a name and apikey from the service to create a session, and can 
+ * query the service to return a given number of Waldos and remembers them for
+ * the session. Interaction with the Waldo service requires parsing returned
+ * JSON strings. Retrieval of messages left for the user of this service. User
+ * location is set by MapDisplayFragment via the private UserLocationFinder class.
+ * 
+ * @author Jagdeep Gill
+ * @author CPSC210 instructor
+ * @see ca.ubc.cpsc210.waldo.map.MapDisplayFragment
+ */
+public class WaldoService {
+
+	// Web service url including http://
+	private final static String WALDO_WEB_SERVICE_URL = "http://kramer.nss.cs.ubc.ca:8080/";
+
+	String BASE_URL = "http://kramer.nss.cs.ubc.ca:8080/";
+
+	private String name;
+	private String apiKey;
+	private LatLon myLocation;
+	
+	private List<Waldo> waldos;
+	private List<String> messages;
+
+	/**
+	 * Constructor
+	 * 
+	 * Initializes the WaldoService object. Sets the name, apiKey and user location to null,
+	 * and initializes a new list of Waldos.
+	 * 
+	 * @author Jagdeep Gill
+	 */
+	public WaldoService() {
+		this.name = null;
+		this.apiKey = null;
+		this.myLocation = null;
+		waldos = new ArrayList<Waldo>();
+	}
+
+	/**
+	 * Initialize a session with the Waldo web service. The session can time out
+	 * even while the app is active...
+	 * 
+	 * @author Jagdeep Gill
+	 * @param nameToUse
+	 *            The name to go register, can be null if you want Waldo service to
+	 *            generate a name
+	 * @return The name that Waldo service gave you
+	 */
+	// Code is adapted from TranslinkService.getBusEstimatesForStop
+	public String initSession(String nameToUse) {
+		StringBuilder initUrl = new StringBuilder(BASE_URL);
+		initUrl.append("initsession/");
+
+		if (nameToUse == null){
+			initUrl.append("");
+		} else
+			initUrl.append(nameToUse);
+
+		InputStream in = null;
+		try {
+			String s = makeJSONQuery(initUrl);
+			parseInitSessionFromJSON(s);
+		} catch (Exception e) {
+			System.out.println("Exception during initSession JSON query to Waldo service.");
+			e.printStackTrace();
+		} finally {
+			if (in != null)
+				try {
+					in.close();
+				} catch (IOException e) {
+					// Oh well, couldn't free resource. Don't worry about it for now
+				}
+		}
+		System.out.println("Session initialized: " + "name=" + this.name + " apiKey=" + this.apiKey + " location=" + this.myLocation);
+		return this.name;
+	}
+
+	/**
+	 * Get Waldos by querying the Waldo web service.
+	 * 
+	 * @author Jagdeep Gill
+	 * @param numberOfWaldos
+	 * @return A list of Waldo objects
+	 */
+	// Code is adapted from TranslinkService.getBusEstimatesForStop
+	public List<Waldo> getRandomWaldos(int numberOfWaldos) {
+		StringBuilder initUrl = new StringBuilder(BASE_URL);
+		initUrl.append("getwaldos/");
+
+		if (this.apiKey == null){
+			throw new WaldoException("No API key for the Waldo service.");
+		} else
+			initUrl.append(this.apiKey + "/");
+		initUrl.append(numberOfWaldos);
+		InputStream in = null;
+		try {
+			String s = makeJSONQuery(initUrl);
+			System.out.println("Number of Waldos requested= " + numberOfWaldos);
+			this.waldos.clear();
+			parseWaldos(s);
+		} catch (Exception e) {
+			System.out.println("Exception while getting Waldos from the Waldo service.");
+			e.printStackTrace();
+		} finally {
+			if (in != null)
+				try {
+					in.close();
+				} catch (IOException e) {
+					// Oh well, couldn't free resource. Don't worry about it for now
+				}
+		}
+		System.out.println("Session initialized: " + "name=" + this.name + " apiKey=" + this.apiKey + " location=" + this.myLocation);
+		System.out.println(this.waldos);
+		return this.waldos;		
+	}
+
+	/**
+	 * Return the current list of Waldos that have been retrieved
+	 * 
+	 * @return The current Waldos.
+	 */
+	public List<Waldo> getWaldos() {
+		return this.waldos;
+	}
+
+	/**
+	 * Retrieve messages available for the user from the Waldo web service
+	 * 
+	 * @author Jagdeep Gill
+	 * @return A list of messages for the user.
+	 */
+	// Code is adapted from TranslinkService.getBusEstimatesForStop
+	public List<String> getMessages() {
+		StringBuilder initUrl = new StringBuilder(BASE_URL);
+		initUrl.append("getmsgs/");
+		initUrl.append(this.apiKey + "/");
+		InputStream in = null;
+		try {
+			this.messages = new ArrayList<String>();
+			String s = makeJSONQuery(initUrl);
+			parseMessagesFromJSON(s);
+		} catch (Exception e) {
+			System.out.println("Exception during getMsgs query to Waldo service.");
+			e.printStackTrace();
+		} finally {
+			if (in != null)
+				try {
+					in.close();
+				} catch (IOException e) {
+					// Oh well, couldn't free resource. Don't worry about it for now
+				}
+		}
+		System.out.println("MESSAGES= " + getMyMessages());
+		if (getMyMessages().size() > 0){
+			return getMyMessages();
+		}
+		List<String> noMsgs = new ArrayList<String>();
+		noMsgs.add("No messages.");
+		return noMsgs;
+	}
+
+	/**
+	 * Parses a JSON messages string returned obtained from getMessages()
+	 * 
+	 * @author Jagdeep Gill
+	 * @param input The JSON string to parse
+	 */
+	// Adapted from TranslinkService.parseBusStopsAroundFromJSON()
+	private void parseMessagesFromJSON(String input) {
+		JSONObject obj;
+		try {
+			obj = (JSONObject) (new JSONTokener(input).nextValue());
+			if (obj != null) {
+				int i;
+				JSONArray msgs = (JSONArray) obj.get("Messages");
+				for (i=0; i < obj.length(); i++){
+					JSONObject msgObject = msgs.getJSONObject(i);
+					System.out.println("MESSAGE Object= " + msgObject);
+					try{
+						String msg = msgObject.getString("Message");
+						if (msg == null){
+							return;
+						}
+							String from = msgObject.getString("Name");
+							String msgString = new String (from + "'s " + msg + "\n");
+							System.out.println("Message " + i + "= " + msgString);
+							addMessage(msgString);
+					}
+					catch (JSONException e){
+						String errorNumber = msgObject.getString("ErrorNumber");
+						String errorString = msgObject.getString("ErrorMessage");
+						System.out.println("Error number=" + errorNumber + " Error message=" + errorString);
+					}
+				}
+			}
+		} catch (JSONException e) {
+			System.out.println("Some unknown exception occurred during Waldo parsing.");
+			e.printStackTrace();
+		}	
+	}
+
+	/**
+	 * Makes an http request to a web service that will return a JSON string.
+	 * @author Jagdeep Gill
+	 * @param urlBuilder The URL to send an http request
+	 * @throws WaldoException
+	 * @return A JSON string containing requested data.
+	 */
+	private String makeJSONQuery(StringBuilder urlBuilder) {
+		try {
+			URL url = new URL(urlBuilder.toString());
+			System.out.println("Attempting to connect to: " + url);
+			HttpURLConnection client = (HttpURLConnection) url.openConnection();
+			client.setRequestProperty("accept", "application/json");
+			InputStream in = client.getInputStream();
+			BufferedReader br = new BufferedReader(new InputStreamReader(in));
+			String returnString = br.readLine();
+			client.disconnect();
+			System.out.println("JSON query return string=" + returnString);
+			return returnString;
+		} catch (Exception e) {
+			throw new WaldoException("Unable to make JSON query: " + urlBuilder.toString());
+		}
+	}
+
+	/**
+	 * Parses the return JSON string obtained by initSession() to obtain the name and apikey
+	 * 
+	 * @author Jagdeep Gill
+	 * @param input The JSON return string to parse
+	 */
+	// Adapted from TranslinkService.parseBusStopsAroundFromJSON()
+	private void parseInitSessionFromJSON(String input) {
+		JSONObject obj;
+
+		try {
+			obj = (JSONObject) (new JSONTokener(input).nextValue());
+			if (obj != null) {
+				String name;
+				String key;
+				// Don't need to parse location since its always null when initSession call is made.
+				try {
+					name = obj.getString("Name");
+					key = obj.getString("Key");
+					setName(name);
+					setKey(key);
+					System.out.println("Done parsing initSession");
+				} catch (JSONException e) {
+					String errorNumber = obj.getString("ErrorNumber");
+					String errorString = obj.getString("ErrorMessage");
+					System.out.println("Error number=" + errorNumber + " Error message=" + errorString);
+				}
+			}
+		} catch (JSONException e) {
+			System.out.println("Some unknown exception occurred during initSession query to Waldo service.");
+			e.printStackTrace();
+		}
+	}
+
+	/**
+	 * Parses a JSON string to create remembered Waldo objects.
+	 * @author Jagdeep Gill
+	 * @param input the JSON string to parse
+	 */
+	// Adapted from TranslinkService.parseBusStopsAroundFromJSON()
+	private void parseWaldos(String input){
+		JSONArray obj;
+		try {
+			obj = (JSONArray) (new JSONTokener(input).nextValue());
+			if (obj != null) {
+				int i;
+				for (i=0; i < obj.length(); i++){
+					JSONObject waldoObject = obj.getJSONObject(i);
+					try{
+							String name = waldoObject.getString("Name");
+							JSONObject location = waldoObject.getJSONObject("Loc");
+							Double lat = location.getDouble("Lat");
+							Double lon = location.getDouble("Long");
+							LatLon latlon = new LatLon(lat, lon);
+							long timeStamp = Long.parseLong(location.getString("Tstamp"));
+							Date dateStamp = new Date(timeStamp);
+							Waldo thisWaldo = new Waldo(name, dateStamp, latlon);
+							System.out.println(thisWaldo);
+							waldos.add(thisWaldo);
+							System.out.println("Parsed Waldo #" + i + " " + thisWaldo);	
+					}
+					catch (JSONException e){
+						String errorNumber = waldoObject.getString("ErrorNumber");
+						String errorString = waldoObject.getString("ErrorMessage");
+						System.out.println("Error number=" + errorNumber + " Error message=" + errorString);
+					}
+				}
+				System.out.println("Total Waldos parsed= " + i);
+			}
+		} catch (JSONException e) {
+			System.out.println("Some unknown exception occurred during Waldo parsing.");
+			e.printStackTrace();
+		}	
+	}
+
+	private void setName(String name){
+		this.name = name;
+	}
+	
+	private void setKey(String key){
+		this.apiKey = key;
+	}
+	
+	public LatLon getMyLocation(){
+		return this.myLocation;
+	}
+	
+	public void setMyLocation(LatLon location){
+		this.myLocation = location;
+	}
+	
+	public List<String> getMyMessages(){
+		return this.messages;
+	}
+	
+	private void addMessage(String msgString) {
+		this.messages.add(msgString);
+	}
+	
+	public String toString(){
+		
+		return "Service name=" + this.name + " key=" + this.apiKey 
+				+ " location=" + this.myLocation + "Size of Waldos array=" 
+				+ this.waldos.size() + " Waldos=" + this.waldos.toString();
+	}
+
+}

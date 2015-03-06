@@ -1,0 +1,30 @@
+package ca.ubc.cpsc210.waldo.util;
+
+import java.util.Comparator;
+
+import ca.ubc.cpsc210.waldo.model.BusStop;
+
+public class BusStopComparator implements Comparator<BusStop>{
+
+	private LatLon latLonToCompareTo;
+	
+	public BusStopComparator(LatLon latLonToCompareTo) {
+		super();
+		this.latLonToCompareTo = latLonToCompareTo;
+	}
+
+	@Override
+	public int compare(BusStop lhs, BusStop rhs) {
+		Double distance1 = LatLon.distanceBetweenTwoLatLon(latLonToCompareTo, lhs.getLatLon());
+		Double distance2 = LatLon.distanceBetweenTwoLatLon(latLonToCompareTo, rhs.getLatLon());
+		Integer comparison = this.compare(distance1, distance2);
+		return comparison;
+	}
+
+	private static int compare(Double a, Double b) {
+	    return a < b ? -1
+	         : a > b ? 1
+	         : 0;
+	  }
+	
+}
